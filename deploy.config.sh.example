@@ -1,0 +1,22 @@
+# Copy to deploy.config.sh and fill in your real values.
+# deploy.config.sh is for your machine only — keep real server details and
+# credentials out of source control (it's already listed in .gitignore).
+
+# SSH destination for the server. Panel is Webuzo, server 187.127.124.99.
+# root works; confirm the port too if it doesn't connect (Webuzo sometimes
+# uses a non-standard SSH port — check its panel under SSH Access).
+DEPLOY_HOST="root@187.127.124.99"
+
+# Optional: a dedicated deploy key instead of relying on ssh-agent/default
+# identity resolution. Leave blank ("") to use whatever `ssh` would
+# normally pick (agent-loaded keys, ~/.ssh/config, etc.) instead.
+SSH_KEY="$HOME/.ssh/id_ed25519_nmawebinar"
+
+# Absolute path to this app's directory on the server — confirmed:
+# /home/sulutions_cloud/public_html/NMAWebinar. The process running there
+# is a bare `node server.js` with no supervisor at all (no PM2, no
+# Passenger, no Webuzo Application Manager — deploy.sh's
+# scripts/restart-app.sh handles restarting it directly). Must be a real
+# absolute path, not `~`-relative (the deploy script single-quotes it
+# remotely, which disables `~` expansion).
+DEPLOY_PATH="/home/sulutions_cloud/public_html/NMAWebinar"

@@ -1,0 +1,29 @@
+# Reference copy only — this is NOT synced by deploy.sh (deliberately
+# excluded, see deploy.sh's --exclude '/.htaccess'). The real file lives on
+# the server at /home/sulutions_cloud/public_html/NMAWebinar/.htaccess and
+# is the ONLY thing that makes Apache proxy requests to the Node app at all.
+#
+# Discovered 2026-08-21 after this exact file was accidentally deleted by an
+# early deploy.sh run (rsync --delete, .htaccess wasn't excluded yet) — it
+# was never managed by Webuzo's Application Manager (confirmed: "No
+# application exist" in Webuzo's Applications > List Applications for this
+# account), so there's no panel button to regenerate it. It was originally
+# hand-written, following the same pattern as sibling apps under this same
+# account (compare /home/sulutions_cloud/public_html/mahardika4/.htaccess).
+#
+# The port (3002) must match PORT in .env — if that's ever changed, this
+# file must be updated to match, by hand, on the server.
+#
+# If this ever goes missing again: recreate it with
+#   cat > /home/sulutions_cloud/public_html/NMAWebinar/.htaccess << 'EOF'
+#   <the content below>
+#   EOF
+#   chmod 644 /home/sulutions_cloud/public_html/NMAWebinar/.htaccess
+
+RewriteEngine On
+
+# Don't try to serve index.php or any directory index
+DirectoryIndex disabled
+
+# Forward everything to the Node app
+RewriteRule ^(.*)$ http://127.0.0.1:3002/$1 [P,L]
