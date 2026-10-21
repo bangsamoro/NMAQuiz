@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Check, Trash2, RefreshCw, Download, Trophy } from 'lucide-react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
+import { Check, Trash2, RefreshCw, Download, Trophy, ChevronDown, ChevronRight } from 'lucide-react';
 import { PALETTE } from '../theme.js';
-import { formatDuration } from '../utils.js';
-import { apiGetSubmissions, apiDeleteSubmission } from '../api.js';
+import { formatDuration, normalizeAnswer } from '../utils.js';
+import { apiGetSubmissions, apiDeleteSubmission, apiGetQuiz } from '../api.js';
 import { WinnersCardModal } from './WinnersCard.jsx';
 
 // ============================================================================
@@ -14,6 +14,27 @@ export function AdminResponses({ token, slug, quizTitle }) {
   const [search, setSearch] = useState('');
   const [winnersOnly, setWinnersOnly] = useState(false);
   const [showWinnersCard, setShowWinnersCard] = useState(false);
+  const [questionsById, setQuestionsById] = useState({});
+  const [expandedId, setExpandedId] = useState(null);
+
+  // Question text/type lookup, so typed answers can be shown next to the
+  // question they answered (submissions only store ids + raw answers).
+  useEffect(() => {
+    apiGetQuiz(slug, token).then((q) => {
+      setQuestionsById(Object.fromEntries(((q && q.questions) || []).map((x) => [x.id, x])));
+    });
+  }, [slug, token]);
+
+  const writtenAnswers = (s) => {
+    const ids = s.questionIds || [];
+    return ids.flatMap((id, i) => {
+      const q = questionsById[id];
+      const a = s.answers ? s.answers[i] : null;
+      if (!q || (q.type !== 'text' && q.type !== 'short') || typeof a !== 'string') return [];
+      const accepted = q.type === 'text' ? q.options.map(normalizeAnswer).filter(Boolean) : [];
+      return [{ question: q.text, answer: a, correct: accepted.length ? accepted.includes(normalizeAnswer(a)) : null }];
+    });
+  };
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -36,7 +57,7 @@ export function AdminResponses({ token, slug, quizTitle }) {
 
   if (winnersOnly) {
     filtered = filtered
-      .filter((s) => s.score === s.total)
+      .filter((s) => s.total > 0 && s.score === s.total)
       .slice()
       .sort((a, b) => (a.durationMs ?? Infinity) - (b.durationMs ?? Infinity));
   }
@@ -44,14 +65,14 @@ export function AdminResponses({ token, slug, quizTitle }) {
   // Top 3 perfect scores, fastest first — independent of the winnersOnly
   // toggle above, so the announcement card works regardless of table filter.
   const top3 = submissions
-    .filter((s) => s.score === s.total)
+    .filter((s) => s.total > 0 && s.score === s.total)
     .slice()
     .sort((a, b) => (a.durationMs ?? Infinity) - (b.durationMs ?? Infinity))
     .slice(0, 3);
 
   const exportCsv = () => {
-    const header = ['Name', 'Email', 'Mobile/GCash', 'Facebook Profile', 'IP Address', 'Followed FB', 'Score', 'Total', 'Percent', 'Time Taken', 'Submitted At'];
-    const rows = filtered.map((s) => [s.name, s.email, s.mobile, s.facebookProfile || '', s.ip || '', s.followConfirmed ? 'Yes' : 'No', s.score, s.total, `${Math.round((s.score / s.total) * 100)}%`, formatDuration(s.durationMs), s.timestamp]);
+    const header = ['Name', 'Email', 'Mobile/GCash', 'Facebook Profile', 'IP Address', 'Followed FB', 'Score', 'Total', 'Percent', 'Time Taken', 'Submitted At', 'Written Answers'];
+    const rows = filtered.map((s) => [s.name, s.email, s.mobile, s.facebookProfile || '', s.ip || '', s.followConfirmed ? 'Yes' : 'No', s.score, s.total, s.total > 0 ? `${Math.round((s.score / s.total) * 100)}%` : '', formatDuration(s.durationMs), s.timestamp, writtenAnswers(s).map((w) => `${w.question}: ${w.answer}`).join(' | ')]);
     const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -88,12 +109,16 @@ export function AdminResponses({ token, slug, quizTitle }) {
             <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: PALETTE.emeraldDark, color: '#fff' }}>
-                  {[winnersOnly ? 'Rank' : null, 'Name', 'Email', 'Mobile/GCash', 'Facebook', 'IP Address', 'FB', 'Score', 'Time', 'Submitted', ''].filter(Boolean).map((h) => <th key={h} className="text-left px-4 py-3 text-xs uppercase tracking-widest whitespace-nowrap">{h}</th>)}
+                  {[winnersOnly ? 'Rank' : null, 'Name', 'Email', 'Mobile/GCash', 'Facebook', 'IP Address', 'FB', 'Score', 'Answers', 'Time', 'Submitted', ''].filter(Boolean).map((h) => <th key={h} className="text-left px-4 py-3 text-xs uppercase tracking-widest whitespace-nowrap">{h}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((s, i) => (
-                  <tr key={s.id} style={{ background: i % 2 ? PALETTE.cream : PALETTE.paper, borderTop: `1px solid ${PALETTE.line}` }}>
+                {filtered.map((s, i) => {
+                  const written = writtenAnswers(s);
+                  const expanded = expandedId === s.id;
+                  return (
+                  <Fragment key={s.id}>
+                  <tr style={{ background: i % 2 ? PALETTE.cream : PALETTE.paper, borderTop: `1px solid ${PALETTE.line}` }}>
                     {winnersOnly && <td className="px-4 py-3" style={{ fontWeight: 800 }}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}</td>}
                     <td className="px-4 py-3" style={{ fontWeight: 700 }}>{s.name}</td>
                     <td className="px-4 py-3">{s.email}</td>
@@ -107,12 +132,39 @@ export function AdminResponses({ token, slug, quizTitle }) {
                     </td>
                     <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: PALETTE.inkSoft }}>{s.ip || '—'}</td>
                     <td className="px-4 py-3 text-center">{s.followConfirmed ? <Check size={14} color={PALETTE.emerald} /> : <span style={{ color: PALETTE.inkSoft }}>—</span>}</td>
-                    <td className="px-4 py-3"><span style={{ color: s.score / s.total >= 0.5 ? PALETTE.emerald : PALETTE.red, fontWeight: 700 }}>{s.score}/{s.total}</span></td>
+                    <td className="px-4 py-3">{s.total > 0
+                      ? <span style={{ color: s.score / s.total >= 0.5 ? PALETTE.emerald : PALETTE.red, fontWeight: 700 }}>{s.score}/{s.total}</span>
+                      : <span style={{ color: PALETTE.inkSoft }}>—</span>}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {written.length ? (
+                        <button onClick={() => setExpandedId(expanded ? null : s.id)} className="inline-flex items-center gap-1 text-xs" style={{ color: PALETTE.emerald, fontWeight: 700 }}>
+                          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {written.length} written
+                        </button>
+                      ) : <span style={{ color: PALETTE.inkSoft }}>—</span>}
+                    </td>
                     <td className="px-4 py-3" style={{ color: PALETTE.inkSoft }}>{formatDuration(s.durationMs)}</td>
                     <td className="px-4 py-3" style={{ color: PALETTE.inkSoft }}>{new Date(s.timestamp).toLocaleString()}</td>
                     <td className="px-4 py-3"><button onClick={() => removeOne(s.id)} title="Delete response"><Trash2 size={14} color={PALETTE.red} /></button></td>
                   </tr>
-                ))}
+                  {expanded && (
+                    <tr style={{ background: PALETTE.cream }}>
+                      <td colSpan={20} className="px-4 py-3">
+                        <div className="flex flex-col gap-2">
+                          {written.map((w, wi) => (
+                            <div key={wi} className="text-sm">
+                              <div style={{ color: PALETTE.inkSoft, fontWeight: 600 }}>{w.question}</div>
+                              <div style={{ fontWeight: 700, color: w.correct === true ? PALETTE.emerald : w.correct === false ? PALETTE.red : PALETTE.ink }}>
+                                {w.correct === true && '✓ '}{w.correct === false && '✗ '}{w.answer}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
+                  );
+                })}
               </tbody>
 
             </table>

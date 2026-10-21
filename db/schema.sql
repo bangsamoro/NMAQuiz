@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS questions (
   quiz_slug      VARCHAR(64) NOT NULL,
   legacy_id      VARCHAR(64) NOT NULL,
   position       INT NOT NULL,
+  type           VARCHAR(16) NOT NULL DEFAULT 'mcq',
   text           TEXT NOT NULL,
   options        JSON NOT NULL,
   correct_index  INT NOT NULL,

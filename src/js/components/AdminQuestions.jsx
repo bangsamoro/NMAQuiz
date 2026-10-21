@@ -10,6 +10,13 @@ import { Field } from './atoms.jsx';
 // ============================================================================
 // Exposes `save` via ref so AdminPanel can trigger it from the Save Quiz
 // button it renders in its own tab row, alongside Responses/Manage Quiz.
+const QUESTION_TYPES = [
+  { value: 'mcq', label: 'Multiple choice' },
+  { value: 'truefalse', label: 'True or False' },
+  { value: 'text', label: 'Text answer (auto-graded)' },
+  { value: 'short', label: 'Short answer (not graded)' },
+];
+
 export const AdminQuestions = forwardRef(function AdminQuestions({ quiz, token, onSaved }, ref) {
   const [draft, setDraft] = useState(quiz);
   const [status, setStatus] = useState(null);
@@ -31,7 +38,19 @@ export const AdminQuestions = forwardRef(function AdminQuestions({ quiz, token, 
     const qs = draft.questions.slice(); const opts = qs[qi].options.slice(); opts[oi] = value;
     qs[qi] = { ...qs[qi], options: opts }; setDraft({ ...draft, questions: qs });
   };
-  const addQuestion = () => setDraft({ ...draft, questions: [...draft.questions, { id: `q${Date.now()}`, text: '', options: ['', '', '', ''], correctIndex: 0 }] });
+  const addQuestion = () => setDraft({ ...draft, questions: [...draft.questions, { id: `q${Date.now()}`, type: 'mcq', text: '', options: ['', '', '', ''], correctIndex: 0 }] });
+  // Switching type resets the options/answer shape to that type's defaults
+  // (keeping existing MCQ options when staying within the choice types).
+  const changeType = (i, type) => {
+    const q = draft.questions[i];
+    if (q.type === type) return;
+    const patch = { type, correctIndex: 0 };
+    if (type === 'mcq') patch.options = q.type === 'mcq' ? q.options : ['', '', '', ''];
+    else if (type === 'truefalse') patch.options = ['True', 'False'];
+    else if (type === 'text') patch.options = [''];
+    else patch.options = [];
+    updateQuestion(i, patch);
+  };
   const removeQuestion = (i) => setDraft({ ...draft, questions: draft.questions.filter((_, idx) => idx !== i) });
 
   const save = async () => {
@@ -122,7 +141,7 @@ export const AdminQuestions = forwardRef(function AdminQuestions({ quiz, token, 
         const imported = rows.slice(startIdx).map((r, idx) => {
           const [text, o1, o2, o3, o4, correct] = r;
           const correctIndex = Math.max(0, Math.min(3, (parseInt(correct, 10) || 1) - 1));
-          return { id: `csv${Date.now()}-${idx}`, text: (text || '').trim(), options: [o1, o2, o3, o4].map((o) => (o || '').trim()), correctIndex };
+          return { id: `csv${Date.now()}-${idx}`, type: 'mcq', text: (text || '').trim(), options: [o1, o2, o3, o4].map((o) => (o || '').trim()), correctIndex };
         }).filter((q) => q.text && q.options.every((o) => o));
         if (!imported.length) { setCsvError('No valid rows found. Expected columns: Question, Option1, Option2, Option3, Option4, CorrectOption(1-4).'); return; }
         setDraft({ ...draft, questions: [...draft.questions, ...imported] });
@@ -253,18 +272,60 @@ export const AdminQuestions = forwardRef(function AdminQuestions({ quiz, token, 
             <span className="text-xs uppercase tracking-widest" style={{ color: PALETTE.inkSoft, fontWeight: 700 }}>Question {qi + 1}</span>
             <button onClick={() => removeQuestion(qi)} className="text-xs inline-flex items-center gap-1" style={{ color: PALETTE.red, fontWeight: 700 }}><Trash2 size={14} /> Remove</button>
           </div>
+          <select value={q.type || 'mcq'} onChange={(e) => changeType(qi, e.target.value)}
+            className="px-3 py-2 rounded-lg outline-none text-sm mb-3" style={{ border: `1.5px solid ${PALETTE.line}`, fontFamily: BODY_FONT }}>
+            {QUESTION_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
           <input value={q.text} onChange={(e) => updateQuestion(qi, { text: e.target.value })} placeholder="Question text"
             className="w-full px-4 py-3 rounded-lg mb-3 outline-none" style={{ border: `1.5px solid ${PALETTE.line}`, fontFamily: BODY_FONT }} />
-          <div className="grid gap-2">
-            {q.options.map((opt, oi) => (
-              <div key={oi} className="flex items-center gap-2">
-                <input type="radio" name={`correct-${q.id}`} checked={q.correctIndex === oi} onChange={() => updateQuestion(qi, { correctIndex: oi })} />
-                <input value={opt} onChange={(e) => updateOption(qi, oi, e.target.value)} placeholder={`Option ${oi + 1}`}
-                  className="flex-1 px-3 py-2 rounded-lg outline-none text-sm" style={{ border: `1.5px solid ${q.correctIndex === oi ? PALETTE.emerald : PALETTE.line}`, fontFamily: BODY_FONT }} />
+          {(q.type || 'mcq') === 'mcq' && (
+            <>
+              <div className="grid gap-2">
+                {q.options.map((opt, oi) => (
+                  <div key={oi} className="flex items-center gap-2">
+                    <input type="radio" name={`correct-${q.id}`} checked={q.correctIndex === oi} onChange={() => updateQuestion(qi, { correctIndex: oi })} />
+                    <input value={opt} onChange={(e) => updateOption(qi, oi, e.target.value)} placeholder={`Option ${oi + 1}`}
+                      className="flex-1 px-3 py-2 rounded-lg outline-none text-sm" style={{ border: `1.5px solid ${q.correctIndex === oi ? PALETTE.emerald : PALETTE.line}`, fontFamily: BODY_FONT }} />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <p className="text-xs mt-2" style={{ color: PALETTE.inkSoft }}>Select the radio button next to the correct option.</p>
+              <p className="text-xs mt-2" style={{ color: PALETTE.inkSoft }}>Select the radio button next to the correct option.</p>
+            </>
+          )}
+          {q.type === 'truefalse' && (
+            <div className="flex items-center gap-5">
+              {['True', 'False'].map((label, oi) => (
+                <label key={label} className="inline-flex items-center gap-2 text-sm cursor-pointer" style={{ fontWeight: 600 }}>
+                  <input type="radio" name={`correct-${q.id}`} checked={q.correctIndex === oi} onChange={() => updateQuestion(qi, { correctIndex: oi })} />
+                  {label} {q.correctIndex === oi && <span className="text-xs" style={{ color: PALETTE.emerald }}>(correct)</span>}
+                </label>
+              ))}
+            </div>
+          )}
+          {q.type === 'text' && (
+            <>
+              <div className="grid gap-2">
+                {q.options.map((opt, oi) => (
+                  <div key={oi} className="flex items-center gap-2">
+                    <input value={opt} onChange={(e) => updateOption(qi, oi, e.target.value)} placeholder={`Accepted answer ${oi + 1}`}
+                      className="flex-1 px-3 py-2 rounded-lg outline-none text-sm" style={{ border: `1.5px solid ${PALETTE.emerald}`, fontFamily: BODY_FONT }} />
+                    {q.options.length > 1 && (
+                      <button type="button" onClick={() => updateQuestion(qi, { options: q.options.filter((_, idx) => idx !== oi) })} title="Remove this accepted answer">
+                        <Trash2 size={14} color={PALETTE.red} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={() => updateQuestion(qi, { options: [...q.options, ''] })} className="mt-2 text-xs inline-flex items-center gap-1" style={{ color: PALETTE.emerald, fontWeight: 700 }}>
+                <Plus size={12} /> Add another accepted answer
+              </button>
+              <p className="text-xs mt-2" style={{ color: PALETTE.inkSoft }}>Takers type their answer; any one of these counts as correct. Capitals, extra spaces and end punctuation are ignored. With no accepted answers filled in, the question isn't graded.</p>
+            </>
+          )}
+          {q.type === 'short' && (
+            <p className="text-xs" style={{ color: PALETTE.inkSoft }}>Takers type any text. There's no correct answer, so it isn't graded and doesn't count toward the score — read the answers in the Responses tab.</p>
+          )}
         </div>
       ))}
 

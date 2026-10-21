@@ -43,3 +43,9 @@ export function parseCsv(text) {
   if (field !== '' || row.length) { row.push(field); rows.push(row); }
   return rows;
 }
+
+// Same rule the server uses to grade typed answers: case, repeated spaces and
+// end punctuation don't matter.
+export function normalizeAnswer(value) {
+  return String(value ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').replace(/^[\s.,!?'"]+|[\s.,!?'"]+$/g, '').toLowerCase();
+}

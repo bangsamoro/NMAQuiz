@@ -170,11 +170,12 @@ async function fetchQuizRow(slug) {
 
 async function fetchQuestions(slug) {
   const [rows] = await pool.query(
-    'SELECT legacy_id AS id, text, options, correct_index AS correctIndex FROM questions WHERE quiz_slug = ? ORDER BY position ASC',
+    'SELECT legacy_id AS id, type, text, options, correct_index AS correctIndex FROM questions WHERE quiz_slug = ? ORDER BY position ASC',
     [slug]
   );
   return rows.map((r) => ({
     id: r.id,
+    type: r.type || 'mcq',
     text: r.text,
     options: typeof r.options === 'string' ? JSON.parse(r.options) : r.options,
     correctIndex: r.correctIndex,
@@ -256,12 +257,34 @@ async function nextQuizSlug(conn) {
 async function replaceQuestions(conn, slug, questions) {
   await conn.query('DELETE FROM questions WHERE quiz_slug = ?', [slug]);
   for (let i = 0; i < questions.length; i++) {
-    const q = questions[i];
+    const q = normalizeQuestion(questions[i]);
     await conn.query(
-      'INSERT INTO questions (quiz_slug, legacy_id, position, text, options, correct_index) VALUES (?, ?, ?, ?, ?, ?)',
-      [slug, q.id ?? `q${Date.now()}-${i}`, i, q.text ?? '', JSON.stringify(q.options ?? ['', '', '', '']), q.correctIndex ?? 0]
+      'INSERT INTO questions (quiz_slug, legacy_id, position, type, text, options, correct_index) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [slug, questions[i].id ?? `q${Date.now()}-${i}`, i, q.type, q.text, JSON.stringify(q.options), q.correctIndex]
     );
   }
+}
+
+// Question types: 'mcq' (pick one of the options), 'truefalse' (fixed
+// True/False pair), 'text' (typed answer auto-graded against a list of
+// accepted answers — kept in `options`, reusing the existing JSON column),
+// and 'short' (typed answer, never graded, no correct answer at all).
+const QUESTION_TYPES = ['mcq', 'truefalse', 'text', 'short'];
+function normalizeQuestion(q) {
+  const type = QUESTION_TYPES.includes(q.type) ? q.type : 'mcq';
+  const text = q.text ?? '';
+  if (type === 'truefalse') return { type, text, options: ['True', 'False'], correctIndex: q.correctIndex === 1 ? 1 : 0 };
+  if (type === 'text') {
+    const accepted = (Array.isArray(q.options) ? q.options : []).map((o) => String(o ?? '').trim()).filter(Boolean);
+    return { type, text, options: accepted, correctIndex: 0 };
+  }
+  if (type === 'short') return { type, text, options: [], correctIndex: 0 };
+  return { type, text, options: q.options ?? ['', '', '', ''], correctIndex: q.correctIndex ?? 0 };
+}
+
+// Case/spacing/edge-punctuation-insensitive comparison for typed answers.
+function normalizeAnswer(value) {
+  return String(value ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').replace(/^[\s.,!?'"]+|[\s.,!?'"]+$/g, '').toLowerCase();
 }
 
 // In-memory store for in-progress quiz attempts: token -> { slug, startedAt }.
@@ -387,17 +410,28 @@ app.post('/api/quizzes/:slug/start', async (req, res, next) => {
     const selected = shuffleArray(pool_).slice(0, count);
 
     const questionIds = [];
-    const correctIndexes = [];
+    const grading = [];
     const questions = selected.map((q) => {
-      const optionOrder = shuffleArray(q.options.map((_, i) => i)); // e.g. [2,0,3,1]
-      const options = optionOrder.map((origIdx) => q.options[origIdx]);
       questionIds.push(q.id);
-      correctIndexes.push(optionOrder.indexOf(q.correctIndex)); // where the correct option landed after shuffling
-      return { id: q.id, text: q.text, options };
+      if (q.type === 'text' || q.type === 'short') {
+        // Accepted answers are never sent to the client. A 'text' question
+        // with no accepted answers can't be answered correctly by anyone,
+        // so it's treated as an ungraded open question instead.
+        const accepted = q.type === 'text' ? q.options.map(normalizeAnswer).filter(Boolean) : [];
+        grading.push(accepted.length
+          ? { kind: 'text', accepted, display: q.options }
+          : { kind: 'open' });
+        return { id: q.id, type: q.type, text: q.text, options: [] };
+      }
+      // True/False keeps its fixed order; MCQ options are shuffled per taker.
+      const optionOrder = q.type === 'truefalse' ? q.options.map((_, i) => i) : shuffleArray(q.options.map((_, i) => i));
+      const options = optionOrder.map((origIdx) => q.options[origIdx]);
+      grading.push({ kind: 'choice', correctIndex: optionOrder.indexOf(q.correctIndex) }); // where the correct option landed after shuffling
+      return { id: q.id, type: q.type, text: q.text, options };
     });
 
     const token = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    activeAttempts.set(token, { slug: quiz.slug, startedAt: Date.now(), questionIds, correctIndexes });
+    activeAttempts.set(token, { slug: quiz.slug, startedAt: Date.now(), questionIds, grading });
     res.json({ token, questions });
   } catch (err) { next(err); }
 });
@@ -750,12 +784,24 @@ app.post('/api/submissions', async (req, res, next) => {
     activeAttempts.delete(attemptToken); // one-time use — can't be replayed for a second, faster-looking submission
 
     const durationMs = Date.now() - attempt.startedAt;
-    const safeAnswers = Array.isArray(answers) ? answers : [];
-    // Grade against attempt.correctIndexes, not quiz.questions directly — those
+    // Grade against attempt.grading, not quiz.questions directly — choice
     // indexes are relative to the shuffled option order this specific taker
-    // was shown (see /start), which is the only order they ever saw.
-    const total = attempt.correctIndexes.length;
-    const score = attempt.correctIndexes.reduce((s, correctIdx, i) => s + (safeAnswers[i] === correctIdx ? 1 : 0), 0);
+    // was shown (see /start), which is the only order they ever saw. Typed
+    // answers are coerced to bounded strings; open (short-answer) questions
+    // are stored but never graded, so they don't count toward score/total.
+    const rawAnswers = Array.isArray(answers) ? answers : [];
+    const safeAnswers = attempt.grading.map((g, i) => {
+      const a = rawAnswers[i];
+      if (g.kind === 'choice') return Number.isInteger(a) ? a : null;
+      return typeof a === 'string' && a.trim() ? a.trim().slice(0, 1000) : null;
+    });
+    const correct = attempt.grading.map((g, i) => {
+      if (g.kind === 'choice') return safeAnswers[i] === g.correctIndex;
+      if (g.kind === 'text') return safeAnswers[i] != null && g.accepted.includes(normalizeAnswer(safeAnswers[i]));
+      return null;
+    });
+    const total = correct.filter((c) => c !== null).length;
+    const score = correct.filter((c) => c === true).length;
 
     // req.ip respects X-Forwarded-For because of app.set('trust proxy', true).
     const forwarded = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
@@ -776,7 +822,8 @@ app.post('/api/submissions', async (req, res, next) => {
     // locked in — the results-review screen needs them to show right/wrong.
     res.json({
       ok: true, id: result.insertId, score, total, durationMs,
-      correctAnswers: attempt.correctIndexes,
+      correct,
+      correctAnswers: attempt.grading.map((g) => (g.kind === 'choice' ? g.correctIndex : g.kind === 'text' ? g.display : null)),
     });
   } catch (err) { next(err); }
 });

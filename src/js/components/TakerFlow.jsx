@@ -63,6 +63,17 @@ export function TakerFlow({ quiz }) {
     setAnswers(next);
   };
 
+  const setTextAnswer = (value) => {
+    const next = [...answers];
+    next[qIndex] = value;
+    setAnswers(next);
+  };
+
+  const isTyped = (q) => q.type === 'text' || q.type === 'short';
+  const currentAnswered = quizQuestions[qIndex]
+    ? (isTyped(quizQuestions[qIndex]) ? !!(answers[qIndex] || '').trim() : answers[qIndex] != null)
+    : false;
+
   const goNext = async () => {
     if (qIndex + 1 < quizQuestions.length) {
       setQIndex(qIndex + 1);
@@ -95,6 +106,7 @@ export function TakerFlow({ quiz }) {
   const score = gradedResult ? gradedResult.score : 0;
   const total = gradedResult ? gradedResult.total : quizQuestions.length;
   const correctAnswers = gradedResult ? gradedResult.correctAnswers : null;
+  const correctFlags = gradedResult ? gradedResult.correct : null;
   const pct = total ? Math.round((score / total) * 100) : 0;
   const verdict = pct >= 80 ? 'Masha Allah Tabarakallah' : pct >= 50 ? 'Subhanallah Pwede Na' : 'Aral pa more ;)';
 
@@ -178,6 +190,13 @@ export function TakerFlow({ quiz }) {
             Question {qIndex + 1} of {quizQuestions.length}
           </div>
           <h3 className="text-lg sm:text-xl md:text-2xl mb-6" style={{ fontFamily: DISPLAY_FONT, color: PALETTE.ink, fontWeight: 700 }}>{quizQuestions[qIndex].text}</h3>
+          {isTyped(quizQuestions[qIndex]) ? (
+            <div className="mb-6">
+              <textarea value={answers[qIndex] || ''} onChange={(e) => setTextAnswer(e.target.value)} maxLength={1000} rows={quizQuestions[qIndex].type === 'short' ? 4 : 2}
+                placeholder="I-type ang iyong sagot dito…" className="w-full px-4 py-3 rounded-xl outline-none"
+                style={{ border: `1.5px solid ${answers[qIndex] ? PALETTE.emerald : PALETTE.line}`, fontSize: '1rem', resize: 'vertical' }} />
+            </div>
+          ) : (
           <div className="grid gap-3 mb-6">
             {quizQuestions[qIndex].options.map((opt, i) => {
               const selected = answers[qIndex] === i;
@@ -194,7 +213,8 @@ export function TakerFlow({ quiz }) {
               );
             })}
           </div>
-          <button onClick={goNext} disabled={answers[qIndex] == null} className="w-full sm:w-auto px-6 py-4 sm:py-3 rounded-full text-white inline-flex items-center justify-center gap-2 disabled:opacity-40 transition-transform active:scale-95"
+          )}
+          <button onClick={goNext} disabled={!currentAnswered} className="w-full sm:w-auto px-6 py-4 sm:py-3 rounded-full text-white inline-flex items-center justify-center gap-2 disabled:opacity-40 transition-transform active:scale-95"
             style={{ background: `linear-gradient(135deg, ${PALETTE.emerald}, ${PALETTE.emeraldDark})`, fontWeight: 700, boxShadow: `0 8px 20px -6px ${PALETTE.emerald}88` }}>
             {qIndex + 1 < quizQuestions.length ? 'Next Question' : 'Submit'} <ChevronRight size={18} />
           </button>
@@ -208,26 +228,39 @@ export function TakerFlow({ quiz }) {
           <StarDivider />
           {gradedResult ? (
             <>
-              <div className="text-xs uppercase tracking-widest mt-3 mb-1" style={{ color: PALETTE.inkSoft, fontWeight: 700 }}>Ang nakuha mong marka ay:</div>
-              <div className="text-5xl mb-1" style={{ fontFamily: DISPLAY_FONT, color: PALETTE.emerald, fontWeight: 800 }}>{score} / {total}</div>
-              <div className="inline-block text-sm mb-2 px-3 py-1 rounded-full" style={{ color: PALETTE.ink, background: PALETTE.gold, fontWeight: 700 }}>{verdict} ({pct}%)</div>
+              {total > 0 ? (
+                <>
+                  <div className="text-xs uppercase tracking-widest mt-3 mb-1" style={{ color: PALETTE.inkSoft, fontWeight: 700 }}>Ang nakuha mong marka ay:</div>
+                  <div className="text-5xl mb-1" style={{ fontFamily: DISPLAY_FONT, color: PALETTE.emerald, fontWeight: 800 }}>{score} / {total}</div>
+                  <div className="inline-block text-sm mb-2 px-3 py-1 rounded-full" style={{ color: PALETTE.ink, background: PALETTE.gold, fontWeight: 700 }}>{verdict} ({pct}%)</div>
+                </>
+              ) : (
+                <div className="text-2xl mt-3 mb-2" style={{ fontFamily: DISPLAY_FONT, color: PALETTE.emerald, fontWeight: 800 }}>Salamat sa iyong sagot!</div>
+              )}
               <div className="text-xs mb-6" style={{ color: PALETTE.inkSoft }}>Ilang Minuto kang sumagot: {formatDuration(durationMs)}</div>
               {saveError && <div className="max-w-md mx-auto mb-6 p-3 rounded-lg text-xs text-left" style={{ background: '#FCEEEE', color: PALETTE.red, border: `1px solid ${PALETTE.red}` }}>{saveError}</div>}
               <div className="max-w-md mx-auto flex flex-col gap-3 text-left mb-8">
                 {quizQuestions.map((q, i) => {
                   const yourAns = answers[i];
-                  const correctIndex = correctAnswers ? correctAnswers[i] : null;
-                  const correct = correctIndex != null && yourAns === correctIndex;
+                  const typed = isTyped(q);
+                  const graded = correctFlags ? correctFlags[i] : null; // true | false | null (ungraded)
+                  const correctAns = correctAnswers ? correctAnswers[i] : null;
+                  const color = graded === true ? PALETTE.emerald : graded === false ? PALETTE.red : PALETTE.line;
+                  const yourText = typed ? (yourAns || '—') : (yourAns != null ? q.options[yourAns] : '—');
                   return (
-                    <div key={i} className="p-4 rounded-xl" style={{ border: `1.5px solid ${correct ? PALETTE.emerald : PALETTE.red}`, background: correct ? `${PALETTE.emerald}08` : `${PALETTE.red}08` }}>
+                    <div key={i} className="p-4 rounded-xl" style={{ border: `1.5px solid ${color}`, background: graded === null ? PALETTE.cream : `${color}08` }}>
                       <div className="flex items-start gap-2 mb-2">
-                        {correct ? <Check size={16} color={PALETTE.emerald} className="mt-0.5 shrink-0" /> : <X size={16} color={PALETTE.red} className="mt-0.5 shrink-0" />}
+                        {graded === true && <Check size={16} color={PALETTE.emerald} className="mt-0.5 shrink-0" />}
+                        {graded === false && <X size={16} color={PALETTE.red} className="mt-0.5 shrink-0" />}
                         <span style={{ fontWeight: 700 }}>{q.text}</span>
                       </div>
-                      <div className="text-sm" style={{ color: PALETTE.inkSoft }}>
-                        Your answer: <span style={{ color: correct ? PALETTE.emerald : PALETTE.red, fontWeight: 700 }}>{yourAns != null ? q.options[yourAns] : '—'}</span>
+                      <div className="text-sm break-words" style={{ color: PALETTE.inkSoft }}>
+                        Your answer: <span style={{ color: graded === null ? PALETTE.ink : color, fontWeight: 700 }}>{yourText}</span>
                       </div>
-                      {!correct && correctIndex != null && <div className="text-sm" style={{ color: PALETTE.inkSoft }}>Correct answer: <span style={{ color: PALETTE.emerald, fontWeight: 700 }}>{q.options[correctIndex]}</span></div>}
+                      {graded === null && <div className="text-xs mt-1" style={{ color: PALETTE.inkSoft }}>Hindi ito kasama sa marka.</div>}
+                      {graded === false && correctAns != null && (
+                        <div className="text-sm" style={{ color: PALETTE.inkSoft }}>Correct answer: <span style={{ color: PALETTE.emerald, fontWeight: 700 }}>{Array.isArray(correctAns) ? correctAns.join(' / ') : q.options[correctAns]}</span></div>
+                      )}
                     </div>
                   );
                 })}
