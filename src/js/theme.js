@@ -35,7 +35,7 @@ export const DEFAULT_FONTS = {
   body: "'Inter', 'Helvetica Neue', Arial, sans-serif",
 };
 
-export const CATEGORIES = ['Hadith', "Qur'an", 'Seerah', 'Aqeedah', 'Webinars'];
+export const CATEGORIES = ['Hadith', "Qur'an", 'Seerah', 'Aqeedah', 'Webinars', 'Unang Hakbang', 'Salaah at Wudhu', 'Pagsamba', 'Paniniwala', 'Tajweed/Tahseen'];
 
 // Curated starting points shown as cards in the admin Branding tab. Each
 // bundles a full palette + font pairing so picking one is a single click;
@@ -107,6 +107,11 @@ function recomputeCategoryColors() {
   CATEGORY_COLORS['Seerah'] = PALETTE.emeraldDark;
   CATEGORY_COLORS['Aqeedah'] = PALETTE.gold;
   CATEGORY_COLORS['Webinars'] = PALETTE.inkSoft;
+  CATEGORY_COLORS['Unang Hakbang'] = PALETTE.emerald;
+  CATEGORY_COLORS['Salaah at Wudhu'] = PALETTE.emeraldDark;
+  CATEGORY_COLORS['Pagsamba'] = PALETTE.gold;
+  CATEGORY_COLORS['Paniniwala'] = PALETTE.red;
+  CATEGORY_COLORS['Tajweed/Tahseen'] = PALETTE.emerald;
 }
 recomputeCategoryColors();
 

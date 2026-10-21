@@ -42,6 +42,7 @@ export const AdminQuestions = forwardRef(function AdminQuestions({ quiz, token, 
       publishDate: draft.publishDate || null,
       webinarUrl: draft.webinarUrl || null,
       sheikhName: draft.sheikhName || null,
+      webinarHidden: !!draft.webinarHidden,
     }, token);
     setStatus(updated ? 'saved' : 'error');
     if (updated) onSaved(updated);
@@ -167,6 +168,12 @@ export const AdminQuestions = forwardRef(function AdminQuestions({ quiz, token, 
             )}
           </label>
         </div>
+        <label className="mt-3 flex items-center gap-2 cursor-pointer select-none text-sm" style={{ color: PALETTE.ink }}>
+          <input type="checkbox" checked={!!draft.webinarHidden} onChange={(e) => setDraft({ ...draft, webinarHidden: e.target.checked })}
+            className="w-4 h-4" style={{ accentColor: PALETTE.emerald }} />
+          <span style={{ fontWeight: 700 }}>Hide webinar from takers</span>
+          <span className="text-xs" style={{ color: PALETTE.inkSoft }}>— the webinar link, Sheikh name and banner stay saved but aren't shown publicly.</span>
+        </label>
         <div className="mt-3 text-xs flex items-center gap-2" style={{ color: PALETTE.inkSoft }}>
           <Link2 size={13} /> Shareable link: <span style={{ fontWeight: 700, color: PALETTE.emerald }}>{quizUrl(quiz.slug)}</span>
         </div>

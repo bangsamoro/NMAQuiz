@@ -17,6 +17,7 @@ export function QuizPicker({ quizzes, selectedSlug, onSelect, onCreated, onDelet
   const [filterFrom, setFilterFrom] = useState('');
   const [filterTo, setFilterTo] = useState('');
   const [titleQuery, setTitleQuery] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
   const [sortMode, setSortMode] = useState('none'); // 'none' | 'alpha' | 'date'
 
   const create = async () => {
@@ -56,6 +57,7 @@ export function QuizPicker({ quizzes, selectedSlug, onSelect, onCreated, onDelet
 
   const visibleQuizzes = useMemo(() => {
     let list = quizzes;
+    if (filterCategory) list = list.filter((q) => q.category === filterCategory);
     if (filterFrom || filterTo) {
       list = list.filter((q) => {
         if (!q.publishDate) return false;
@@ -80,7 +82,7 @@ export function QuizPicker({ quizzes, selectedSlug, onSelect, onCreated, onDelet
       });
     }
     return list;
-  }, [quizzes, filterFrom, filterTo, titleQuery, sortMode]);
+  }, [quizzes, filterFrom, filterTo, titleQuery, filterCategory, sortMode]);
 
   const clearFilter = () => { setFilterFrom(''); setFilterTo(''); };
 
@@ -149,6 +151,19 @@ export function QuizPicker({ quizzes, selectedSlug, onSelect, onCreated, onDelet
 
       <div className="flex flex-col gap-2 p-3 rounded-xl" style={{ background: PALETTE.cream }}>
         <div className="flex items-center justify-between">
+          <span className="text-xs uppercase tracking-widest" style={{ color: PALETTE.inkSoft, fontWeight: 700 }}>Filter by category</span>
+          {filterCategory && (
+            <button onClick={() => setFilterCategory('')} className="text-[11px] inline-flex items-center gap-1" style={{ color: PALETTE.inkSoft, fontWeight: 700 }}>
+              <X size={11} /> Clear
+            </button>
+          )}
+        </div>
+        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
+          className="px-2.5 py-2 rounded-lg outline-none text-xs" style={{ border: `1.5px solid ${PALETTE.line}` }}>
+          <option value="">All categories</option>
+          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <div className="flex items-center justify-between mt-1">
           <span className="text-xs uppercase tracking-widest" style={{ color: PALETTE.inkSoft, fontWeight: 700 }}>Filter by publish date</span>
           {(filterFrom || filterTo) && (
             <button onClick={clearFilter} className="text-[11px] inline-flex items-center gap-1" style={{ color: PALETTE.inkSoft, fontWeight: 700 }}>

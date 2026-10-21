@@ -20,7 +20,7 @@ const BASE_URL = '/NMAWebinar/';
 const SLUG_PREFIX = 'NMAPH';
 const COUNTER_NAME = 'quiz_number';
 
-const CATEGORIES = ['Hadith', "Qur'an", 'Seerah', 'Aqeedah', 'Webinars'];
+const CATEGORIES = ['Hadith', "Qur'an", 'Seerah', 'Aqeedah', 'Webinars', 'Unang Hakbang', 'Salaah at Wudhu', 'Pagsamba', 'Paniniwala', 'Tajweed/Tahseen'];
 
 // Fisher-Yates shuffle — returns a new shuffled array, doesn't mutate the input.
 function shuffleArray(arr) {
@@ -164,6 +164,7 @@ async function fetchQuizRow(slug) {
     publishDate: toDateStr(r.publish_date),
     webinarUrl: r.webinar_url,
     sheikhName: r.sheikh_name,
+    webinarHidden: !!r.webinar_hidden,
   };
 }
 
@@ -354,7 +355,12 @@ app.get('/api/quizzes/:slug', async (req, res, next) => {
     // imageUrl above) — they're meant to be shown to takers alongside the
     // webinar link, not just used for social-preview meta tags.
     const [[{ c: poolSize }]] = await pool.query('SELECT COUNT(*) AS c FROM questions WHERE quiz_slug = ?', [quiz.slug]);
-    res.json({ ...quiz, questionCount: effectiveQuestionCount(quiz.displayCount, poolSize), webinarBannerUrl });
+    // "Hide webinar" withholds the webinar link, Sheikh name and banner from
+    // takers entirely (not just in the UI) — they stay saved for the admin.
+    const webinarFields = quiz.webinarHidden
+      ? { webinarUrl: null, sheikhName: null, webinarBannerUrl: null }
+      : { webinarBannerUrl };
+    res.json({ ...quiz, ...webinarFields, questionCount: effectiveQuestionCount(quiz.displayCount, poolSize) });
   } catch (err) { next(err); }
 });
 
@@ -507,7 +513,7 @@ app.post('/api/sheikh-names', requireAdminAuth, async (req, res, next) => {
 app.post('/api/quizzes', requireAdminAuth, async (req, res, next) => {
   const conn = await pool.getConnection();
   try {
-    const { title, category, questions, active, displayCount, publishDate, webinarUrl, sheikhName } = req.body;
+    const { title, category, questions, active, displayCount, publishDate, webinarUrl, sheikhName, webinarHidden } = req.body;
 
     await conn.beginTransaction();
     const slug = await nextQuizSlug(conn);
@@ -519,19 +525,20 @@ app.post('/api/quizzes', requireAdminAuth, async (req, res, next) => {
     const finalPublishDate = normalizePublishDate(publishDate);
     const finalWebinarUrl = normalizeWebinarUrl(webinarUrl);
     const finalSheikhName = normalizeSheikhName(sheikhName);
+    const finalWebinarHidden = webinarHidden === true;
     const finalQuestions = questions && questions.length ? questions : [
       { id: `q${Date.now()}`, text: '', options: ['', '', '', ''], correctIndex: 0 },
     ];
 
     await conn.query(
-      'INSERT INTO quizzes (slug, category, title, active, display_count, publish_date, webinar_url, sheikh_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [slug, finalCategory, finalTitle, finalActive, finalDisplayCount, finalPublishDate, finalWebinarUrl, finalSheikhName]
+      'INSERT INTO quizzes (slug, category, title, active, display_count, publish_date, webinar_url, sheikh_name, webinar_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [slug, finalCategory, finalTitle, finalActive, finalDisplayCount, finalPublishDate, finalWebinarUrl, finalSheikhName, finalWebinarHidden]
     );
     await replaceQuestions(conn, slug, finalQuestions);
     await conn.commit();
 
     const { imageUrl, webinarBannerUrl } = resolveBannerUrls(slug, req);
-    res.json({ id: slug, slug, category: finalCategory, title: finalTitle, active: finalActive, displayCount: finalDisplayCount, publishDate: finalPublishDate, webinarUrl: finalWebinarUrl, sheikhName: finalSheikhName, imageUrl, webinarBannerUrl, participantCount: 0, questions: finalQuestions });
+    res.json({ id: slug, slug, category: finalCategory, title: finalTitle, active: finalActive, displayCount: finalDisplayCount, publishDate: finalPublishDate, webinarUrl: finalWebinarUrl, sheikhName: finalSheikhName, webinarHidden: finalWebinarHidden, imageUrl, webinarBannerUrl, participantCount: 0, questions: finalQuestions });
   } catch (err) {
     await conn.rollback();
     next(err);
@@ -547,7 +554,7 @@ app.put('/api/quizzes/:slug', requireAdminAuth, async (req, res, next) => {
     const existing = await fetchQuizRow(req.params.slug);
     if (!existing || !canAccessQuiz(req.adminUser, existing)) { conn.release(); return res.status(404).json({ error: 'Quiz not found' }); }
 
-    const { title, category, questions, active, displayCount, publishDate, webinarUrl, sheikhName } = req.body;
+    const { title, category, questions, active, displayCount, publishDate, webinarUrl, sheikhName, webinarHidden } = req.body;
     const finalTitle = title ?? existing.title;
     const finalCategory = CATEGORIES.includes(category) ? category : existing.category;
     const finalActive = typeof active === 'boolean' ? active : existing.active;
@@ -555,11 +562,12 @@ app.put('/api/quizzes/:slug', requireAdminAuth, async (req, res, next) => {
     const finalPublishDate = publishDate !== undefined ? normalizePublishDate(publishDate) : existing.publishDate;
     const finalWebinarUrl = webinarUrl !== undefined ? normalizeWebinarUrl(webinarUrl) : existing.webinarUrl;
     const finalSheikhName = sheikhName !== undefined ? normalizeSheikhName(sheikhName) : existing.sheikhName;
+    const finalWebinarHidden = typeof webinarHidden === 'boolean' ? webinarHidden : existing.webinarHidden;
 
     await conn.beginTransaction();
     await conn.query(
-      'UPDATE quizzes SET title = ?, category = ?, active = ?, display_count = ?, publish_date = ?, webinar_url = ?, sheikh_name = ? WHERE slug = ?',
-      [finalTitle, finalCategory, finalActive, finalDisplayCount, finalPublishDate, finalWebinarUrl, finalSheikhName, existing.slug]
+      'UPDATE quizzes SET title = ?, category = ?, active = ?, display_count = ?, publish_date = ?, webinar_url = ?, sheikh_name = ?, webinar_hidden = ? WHERE slug = ?',
+      [finalTitle, finalCategory, finalActive, finalDisplayCount, finalPublishDate, finalWebinarUrl, finalSheikhName, finalWebinarHidden, existing.slug]
     );
     if (questions !== undefined) {
       await replaceQuestions(conn, existing.slug, questions);
@@ -568,7 +576,7 @@ app.put('/api/quizzes/:slug', requireAdminAuth, async (req, res, next) => {
 
     const finalQuestions = questions !== undefined ? questions : await fetchQuestions(existing.slug);
     const { imageUrl, webinarBannerUrl } = resolveBannerUrls(existing.slug, req);
-    res.json({ id: existing.slug, slug: existing.slug, category: finalCategory, title: finalTitle, active: finalActive, displayCount: finalDisplayCount, publishDate: finalPublishDate, webinarUrl: finalWebinarUrl, sheikhName: finalSheikhName, imageUrl, webinarBannerUrl, questions: finalQuestions });
+    res.json({ id: existing.slug, slug: existing.slug, category: finalCategory, title: finalTitle, active: finalActive, displayCount: finalDisplayCount, publishDate: finalPublishDate, webinarUrl: finalWebinarUrl, sheikhName: finalSheikhName, webinarHidden: finalWebinarHidden, imageUrl, webinarBannerUrl, questions: finalQuestions });
   } catch (err) {
     await conn.rollback();
     next(err);
@@ -597,8 +605,8 @@ app.post('/api/quizzes/:slug/duplicate', requireAdminAuth, async (req, res, next
     const title = `${existing.title} (Copy)`;
 
     await conn.query(
-      'INSERT INTO quizzes (slug, category, title, active, display_count, publish_date, webinar_url, sheikh_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [slug, existing.category, title, false, existing.displayCount, existing.publishDate, existing.webinarUrl, existing.sheikhName]
+      'INSERT INTO quizzes (slug, category, title, active, display_count, publish_date, webinar_url, sheikh_name, webinar_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [slug, existing.category, title, false, existing.displayCount, existing.publishDate, existing.webinarUrl, existing.sheikhName, existing.webinarHidden]
     );
     await replaceQuestions(conn, slug, questions);
     // legacy_id is globally unique (not scoped per quiz_slug like
@@ -624,7 +632,7 @@ app.post('/api/quizzes/:slug/duplicate', requireAdminAuth, async (req, res, next
       fs.copyFileSync(path.join(PUBLIC_IMG_DIR, sourceWebinarBanner), path.join(PUBLIC_IMG_DIR, `${webinarBannerBase(slug)}${path.extname(sourceWebinarBanner)}`));
     }
 
-    res.json({ id: slug, slug, category: existing.category, title, active: false, displayCount: existing.displayCount, publishDate: existing.publishDate, webinarUrl: existing.webinarUrl, sheikhName: existing.sheikhName, participantCount: submissionsResult.affectedRows, questions });
+    res.json({ id: slug, slug, category: existing.category, title, active: false, displayCount: existing.displayCount, publishDate: existing.publishDate, webinarUrl: existing.webinarUrl, sheikhName: existing.sheikhName, webinarHidden: existing.webinarHidden, participantCount: submissionsResult.affectedRows, questions });
   } catch (err) {
     await conn.rollback();
     next(err);
